@@ -1,136 +1,249 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace SimpleGeometryDash
+namespace GeometryDashUpgrade
 {
     public class GameForm : Form
     {
-        private PictureBox player;
-        private PictureBox obstacle;
         private System.Windows.Forms.Timer gameTimer;
-        private Label scoreText;
 
-        // PromÏnnÈ pro fyziku a logiku
+        // Fyzika a hr·Ë
+        private float playerY;
+        private float playerVelocity = 0;
+        private float gravity = 1.5f;
+        private float jumpForce = -18f;
         private bool isJumping = false;
-        private int jumpSpeed = 0;
-        private int gravity = 2;
-        private int obstacleSpeed = 10;
+        private float playerRotation = 0;
+        private int playerSize = 40;
+        private int floorY = 320;
+
+        // Logika hry
         private int score = 0;
-        private readonly int floorHeight = 300;
+        private float gameSpeed = 10f;
+        private int spawnDistance = 0;
+        private Random rnd = new Random();
+
+        // Seznamy p¯ek·ûek
+        private List<Rectangle> spikes = new List<Rectangle>();
+        private List<Rectangle> blocks = new List<Rectangle>();
 
         public GameForm()
         {
-            // NastavenÌ hlavnÌho okna
-            this.Text = "Herodetry Dash - prvnÌ f·ze";
+            // NastavenÌ okna
+            this.Text = "Geometry Dash - LepöÌ Verze";
             this.Size = new Size(800, 450);
-            this.BackColor = Color.LightSkyBlue; // Barva pozadÌ
-            this.DoubleBuffered = true; // ZabraÚuje problik·v·nÌ
-            this.KeyDown += new KeyEventHandler(KeyIsDown);
+            this.DoubleBuffered = true; // Z·sadnÌ pro plynulÈ vykreslov·nÌ bez blik·nÌ!
+            this.BackColor = Color.FromArgb(30, 30, 45); // TmavÈ pozadÌ
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
+            this.KeyDown += KeyIsDown;
 
-            // ZobrazenÌ skÛre
-            scoreText = new Label();
-            scoreText.Text = "SkÛre: 0";
-            scoreText.Font = new Font("Arial", 16, FontStyle.Bold);
-            scoreText.Location = new Point(10, 10);
-            scoreText.AutoSize = true;
-            this.Controls.Add(scoreText);
+            playerY = floorY - playerSize;
 
-            // NastavenÌ hr·Ëe (kostky)
-            player = new PictureBox();
-            player.BackColor = Color.Orange;
-            player.Size = new Size(40, 40);
-            player.Location = new Point(100, floorHeight);
-            this.Controls.Add(player);
-
-            // NastavenÌ p¯ek·ûky
-            obstacle = new PictureBox();
-            obstacle.BackColor = Color.Red;
-            obstacle.Size = new Size(30, 40);
-            obstacle.Location = new Point(800, floorHeight);
-            this.Controls.Add(obstacle);
-
-            // ZemÏ (pouze vizu·lnÌ prvek)
-            Label ground = new Label();
-            ground.BackColor = Color.DarkGreen;
-            ground.Size = new Size(800, 150);
-            ground.Location = new Point(0, floorHeight + 40);
-            this.Controls.Add(ground);
-
-            // HernÌ smyËka (»asovaË)
+            // »asovaË (HernÌ smyËka bÏûÌ na cca 60 FPS)
             gameTimer = new System.Windows.Forms.Timer();
-            gameTimer.Interval = 20; // Hra bÏûÌ na cca 50 FPS (1000ms / 20ms)
-            gameTimer.Tick += MainGameTimerEvent;
+            gameTimer.Interval = 16;
+            gameTimer.Tick += GameTick;
             gameTimer.Start();
         }
 
-        private void MainGameTimerEvent(object sender, EventArgs e)
+        private void GameTick(object sender, EventArgs e)
         {
-            // 1. Fyzika skoku (Gravitace t·hne hr·Ëe dol˘)
-            player.Top += jumpSpeed;
-            jumpSpeed += gravity;
+            // 1. Fyzika hr·Ëe
+            playerVelocity += gravity;
+            playerY += playerVelocity;
 
-            // ZastavenÌ p·du, kdyû hr·Ë narazÌ na zem
-            if (player.Top >= floorHeight)
+            // Kontrola dopadu na zem
+            if (playerY >= floorY - playerSize)
             {
-                player.Top = floorHeight;
-                jumpSpeed = 0;
+                playerY = floorY - playerSize;
+                playerVelocity = 0;
                 isJumping = false;
-            }
 
-            // 2. Pohyb p¯ek·ûky smÏrem doleva
-            obstacle.Left -= obstacleSpeed;
-
-            // Pokud p¯ek·ûka zmizÌ z obrazovky, vraù ji doprava a p¯iËti bod
-            if (obstacle.Left < -50)
-            {
-                obstacle.Left = this.ClientSize.Width + 50;
-                score++;
-                scoreText.Text = "SkÛre: " + score;
-
-                // Hra se postupnÏ zrychluje
-                if (obstacleSpeed < 25) obstacleSpeed++;
-            }
-
-            // 3. Detekce kolizÌ (N·raz do p¯ek·ûky)
-            if (player.Bounds.IntersectsWith(obstacle.Bounds))
-            {
-                gameTimer.Stop();
-                MessageBox.Show($"Konec hry! Dos·hl jsi skÛre: {score}\n\nStiskni OK pro novou hru.", "Game Over");
-                ResetGame();
-            }
-        }
-
-        // Reakce na stisk kl·vesy
-        private void KeyIsDown(object sender, KeyEventArgs e)
-        {
-            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Up)
-            {
-                // Hr·Ë m˘ûe skoËit jen kdyû stojÌ na zemi
-                if (!isJumping && player.Top == floorHeight)
+                // Zarovn·nÌ rotace kostky p¯i dopadu (na nejbliûöÌ 90 stupÚ˘)
+                if (playerRotation % 90 != 0)
                 {
-                    isJumping = true;
-                    jumpSpeed = -22; // SÌla skoku
+                    playerRotation = (float)(Math.Round(playerRotation / 90) * 90);
                 }
             }
+            else
+            {
+                // Rotace kostky ve vzduchu
+                playerRotation += 6f;
+            }
+
+            // 2. Generov·nÌ p¯ek·ûek
+            spawnDistance -= (int)gameSpeed;
+            if (spawnDistance <= 0)
+            {
+                GenerateObstacle();
+                spawnDistance = rnd.Next(250, 500); // Kdy se objevÌ dalöÌ
+            }
+
+            // 3. Pohyb a kolize - OSTNY
+            for (int i = spikes.Count - 1; i >= 0; i--)
+            {
+                Rectangle s = spikes[i];
+                s.X -= (int)gameSpeed;
+                spikes[i] = s; // UloûenÌ novÈ pozice
+
+                if (s.X + s.Width < 0) // P¯ek·ûka je mimo obrazovku
+                {
+                    spikes.RemoveAt(i);
+                    score++;
+                    gameSpeed += 0.05f; // MÌrnÈ zrychlov·nÌ hry
+                }
+                else if (CheckCollision(s, true))
+                {
+                    GameOver();
+                    return;
+                }
+            }
+
+            // 4. Pohyb a kolize - BLOKY
+            for (int i = blocks.Count - 1; i >= 0; i--)
+            {
+                Rectangle b = blocks[i];
+                b.X -= (int)gameSpeed;
+                blocks[i] = b;
+
+                if (b.X + b.Width < 0)
+                {
+                    blocks.RemoveAt(i);
+                    score++;
+                    gameSpeed += 0.05f;
+                }
+                else if (CheckCollision(b, false))
+                {
+                    GameOver();
+                    return;
+                }
+            }
+
+            // 5. P¯ik·ûe oknu, aby se znovu vykreslilo (zavol· OnPaint)
+            this.Invalidate();
         }
 
-        // Funkce pro restart hry
-        private void ResetGame()
+        private void GenerateObstacle()
         {
-            player.Top = floorHeight;
-            obstacle.Left = 800;
+            int type = rnd.Next(0, 3);
+            int startX = 850; // ObjevÌ se za prav˝m okrajem obrazovky
+
+            if (type == 0) // Jeden osten
+            {
+                spikes.Add(new Rectangle(startX, floorY - 40, 30, 40));
+            }
+            else if (type == 1) // Dva ostny za sebou
+            {
+                spikes.Add(new Rectangle(startX, floorY - 40, 30, 40));
+                spikes.Add(new Rectangle(startX + 30, floorY - 40, 30, 40));
+            }
+            else // NÌzk˝ blok
+            {
+                blocks.Add(new Rectangle(startX, floorY - 30, 40, 30));
+            }
+        }
+
+        private bool CheckCollision(Rectangle obstacle, bool isSpike)
+        {
+            // Vytvo¯Ìme hitbox hr·Ëe (trochu menöÌ neû grafika, aù je to spravedlivÈ)
+            Rectangle playerBox = new Rectangle(100 + 5, (int)playerY + 5, playerSize - 10, playerSize - 10);
+
+            if (isSpike)
+            {
+                // Hitbox ostnu o¯Ìzneme hlavnÏ z vrchu, protoûe je to troj˙helnÌk
+                Rectangle spikeBox = new Rectangle(obstacle.X + 8, obstacle.Y + 15, obstacle.Width - 16, obstacle.Height - 15);
+                return playerBox.IntersectsWith(spikeBox);
+            }
+            else
+            {
+                return playerBox.IntersectsWith(obstacle);
+            }
+        }
+
+        private void KeyIsDown(object sender, KeyEventArgs e)
+        {
+            // Skok
+            if ((e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) && !isJumping)
+            {
+                playerVelocity = jumpForce;
+                isJumping = true;
+            }
+        }
+
+        private void GameOver()
+        {
+            gameTimer.Stop();
+            MessageBox.Show($"Au! Dos·hl jsi skÛre: {score}\n\nStiskni OK a zkus to znovu.", "Konec hry");
+
+            // Resetov·nÌ vöech promÏnn˝ch pro novou hru
+            spikes.Clear();
+            blocks.Clear();
             score = 0;
-            obstacleSpeed = 10;
-            jumpSpeed = 0;
+            gameSpeed = 10f;
+            playerY = floorY - playerSize;
+            playerVelocity = 0;
             isJumping = false;
-            scoreText.Text = "SkÛre: " + score;
+            spawnDistance = 0;
+            playerRotation = 0;
+
             gameTimer.Start();
         }
 
-        // HlavnÌ vstupnÌ bod aplikace
+        // TATO METODA KRESLÕ CELOU HRU
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias; // Vyhlazov·nÌ hran
+
+            // 1. KreslenÌ zemÏ a neonovÈ linky
+            Rectangle ground = new Rectangle(0, floorY, this.Width, this.Height - floorY);
+            g.FillRectangle(new SolidBrush(Color.FromArgb(20, 20, 60)), ground);
+            g.DrawLine(new Pen(Color.Cyan, 3), 0, floorY, this.Width, floorY);
+
+            // 2. KreslenÌ ostn˘ (jako skuteËnÈ troj˙helnÌky)
+            Brush spikeBrush = new SolidBrush(Color.Red);
+            foreach (Rectangle s in spikes)
+            {
+                Point[] triangle = new Point[] {
+                    new Point(s.X, s.Y + s.Height), // lev˝ dolnÌ roh
+                    new Point(s.X + (s.Width / 2), s.Y), // öpiËka
+                    new Point(s.X + s.Width, s.Y + s.Height) // prav˝ dolnÌ roh
+                };
+                g.FillPolygon(spikeBrush, triangle);
+                g.DrawPolygon(new Pen(Color.DarkRed, 2), triangle);
+            }
+
+            // 3. KreslenÌ blok˘
+            Brush blockBrush = new SolidBrush(Color.DarkOrchid);
+            foreach (Rectangle b in blocks)
+            {
+                g.FillRectangle(blockBrush, b);
+                g.DrawRectangle(new Pen(Color.Magenta, 2), b);
+            }
+
+            // 4. KreslenÌ hr·Ëe S ROTACÕ!
+            g.TranslateTransform(100 + playerSize / 2, playerY + playerSize / 2); // P¯esun do st¯edu hr·Ëe
+            g.RotateTransform(playerRotation); // OtoËenÌ
+
+            Rectangle playerRect = new Rectangle(-playerSize / 2, -playerSize / 2, playerSize, playerSize);
+            g.FillRectangle(new SolidBrush(Color.Yellow), playerRect);
+            g.DrawRectangle(new Pen(Color.Orange, 3), playerRect);
+
+            // OËÌËka na kostce
+            g.FillRectangle(Brushes.Black, -10, -12, 6, 6);
+            g.FillRectangle(Brushes.Black, 4, -12, 6, 6);
+
+            g.ResetTransform(); // Vr·cenÌ rotace, aby se netoËil zbytek obrazovky
+
+            // 5. KreslenÌ skÛre
+            g.DrawString($"SkÛre: {score}", new Font("Arial", 16, FontStyle.Bold), Brushes.White, 10, 10);
+        }
+
         [STAThread]
         static void Main()
         {
