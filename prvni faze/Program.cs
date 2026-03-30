@@ -4,11 +4,12 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace GeometryDashLevel
+namespace GeometryDashPolished
 {
     public class GameForm : Form
     {
         private System.Windows.Forms.Timer gameTimer;
+        private Random rnd = new Random();
 
         // Fyzika a pozice hráèe
         private float playerX = 100;
@@ -16,27 +17,39 @@ namespace GeometryDashLevel
         private float velocityY = 0;
         private float gravity = 1.5f;
         private float jumpForce = -17f;
-        private float speedX = 8f; // Rychlost pohybu dopøedu
+        private float speedX = 9f;
         private bool isGrounded = false;
         private float playerRotation = 0;
         private int playerSize = 40;
 
-        // Level (Plošiny, ostny a cíl)
+        // Level a kamera
         private List<Rectangle> platforms = new List<Rectangle>();
         private List<Rectangle> spikes = new List<Rectangle>();
         private Rectangle finishLine;
-        private float cameraX = 0; // Pozice kamery
+        private float cameraX = 0;
+
+        // Vizuální efekty
+        private List<PointF> trail = new List<PointF>(); // Stopa za hráèem
+        private List<Particle> deathParticles = new List<Particle>(); // Exploze
+        private int tickCounter = 0;
 
         // Stavy hry
         private bool gameOver = false;
         private bool levelComplete = false;
 
+        // Pomocná tøída pro èástice exploze
+        private class Particle
+        {
+            public float X, Y, VX, VY, Life;
+            public Color Color;
+        }
+
         public GameForm()
         {
-            this.Text = "Geometry Dash - Skuteèný Level";
+            this.Text = "Geometry Dash - Grafický Upgrade";
             this.Size = new Size(900, 500);
             this.DoubleBuffered = true;
-            this.BackColor = Color.FromArgb(20, 20, 35);
+            this.BackColor = Color.FromArgb(15, 15, 25); // Ještì tmavší pozadí pro vyniknutí neonù
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.KeyDown += KeyIsDown;
@@ -44,78 +57,84 @@ namespace GeometryDashLevel
             LoadLevel();
 
             gameTimer = new System.Windows.Forms.Timer();
-            gameTimer.Interval = 16; // cca 60 FPS
+            gameTimer.Interval = 16;
             gameTimer.Tick += GameTick;
             gameTimer.Start();
         }
 
-        // TADY SE STAVÍ MAPA
         private void LoadLevel()
         {
             platforms.Clear();
             spikes.Clear();
+            trail.Clear();
+            deathParticles.Clear();
 
-            // Plošina = (X pozice, Y výška, šíøka, hloubka/tlouška bloku)
-            platforms.Add(new Rectangle(0, 350, 800, 500));        // Startovní rovinka
-
-            // Ostrùvek nahoøe
-            platforms.Add(new Rectangle(950, 280, 300, 500));      // Musíš pøeskoèit propast
-
-            // Schody dolù a nahoru
+            // Mapa
+            platforms.Add(new Rectangle(0, 350, 800, 500));
+            platforms.Add(new Rectangle(950, 280, 300, 500));
             platforms.Add(new Rectangle(1400, 350, 400, 500));
-            platforms.Add(new Rectangle(1800, 250, 300, 500));     // Vyšší schod
-            platforms.Add(new Rectangle(2100, 150, 400, 500));     // Ještì vyšší schod
+            platforms.Add(new Rectangle(1800, 250, 300, 500));
+            platforms.Add(new Rectangle(2100, 150, 400, 500));
 
-            // Ostny (X pozice, Y pozice, šíøka, výška)
-            spikes.Add(new Rectangle(500, 310, 40, 40));           // Osten na startu
-            spikes.Add(new Rectangle(1550, 310, 40, 40));          // Osten v dolíku
+            // Ostny
+            spikes.Add(new Rectangle(500, 310, 40, 40));
+            spikes.Add(new Rectangle(1550, 310, 40, 40));
             spikes.Add(new Rectangle(1650, 310, 40, 40));
 
-            // Cíl (Zelená zóna na konci levelu)
             finishLine = new Rectangle(2400, -100, 100, 800);
 
-            // Reset hráèe na start
+            // Reset 
             playerX = 100;
             playerY = 250;
             velocityY = 0;
             playerRotation = 0;
             gameOver = false;
             levelComplete = false;
+            tickCounter = 0;
         }
 
         private void GameTick(object sender, EventArgs e)
         {
-            if (gameOver || levelComplete) return;
+            tickCounter++;
 
-            // Uložení pozice z pøedchozího snímku (dùležité pro kolize)
+            // Pokud jsme mrtví, aktualizujeme jen èástice a nepokraèujeme dál
+            if (gameOver)
+            {
+                for (int i = deathParticles.Count - 1; i >= 0; i--)
+                {
+                    deathParticles[i].X += deathParticles[i].VX;
+                    deathParticles[i].Y += deathParticles[i].VY;
+                    deathParticles[i].VY += 0.5f; // Gravitace èástic
+                    deathParticles[i].Life -= 0.03f; // Umírání èástic
+                    if (deathParticles[i].Life <= 0) deathParticles.RemoveAt(i);
+                }
+                this.Invalidate();
+                return;
+            }
+
+            if (levelComplete) return;
+
             float prevBottom = playerY + playerSize;
-
-            // 1. Pohyb hráèe dopøedu
             playerX += speedX;
-
-            // 2. Fyzika - Pád
             velocityY += gravity;
             playerY += velocityY;
             isGrounded = false;
 
             RectangleF playerRect = new RectangleF(playerX, playerY, playerSize, playerSize);
 
-            // 3. Kolize s plošinami (Zemì a zdi)
+            // Kolize s plošinami
             foreach (Rectangle p in platforms)
             {
                 if (playerRect.IntersectsWith(p))
                 {
-                    // Pokud hráè padal seshora a v minulém snímku byl nad plošinou = dopadl na zem
-                    if (velocityY > 0 && prevBottom <= p.Y + 10) // +10 je tolerance, aby nepropadl skrz pøi vysoké rychlosti
+                    if (velocityY > 0 && prevBottom <= p.Y + 12)
                     {
                         playerY = p.Y - playerSize;
                         velocityY = 0;
                         isGrounded = true;
-
-                        // Zarovnání rotace pøi dopadu
                         if (playerRotation % 90 != 0) playerRotation = (float)(Math.Round(playerRotation / 90) * 90);
                     }
-                    else // Narazil z boku do zdi plošiny
+                    else
                     {
                         Die();
                         return;
@@ -123,17 +142,22 @@ namespace GeometryDashLevel
                 }
             }
 
-            // 4. Rotace ve vzduchu
+            // Rotace
             if (!isGrounded) playerRotation += 7f;
 
-            // 5. Omezení pádu (pokud hráè spadne do propasti)
+            // Ukládání stopy pro Trail efekt (každý druhý snímek uložíme pozici)
+            if (tickCounter % 2 == 0)
+            {
+                trail.Add(new PointF(playerX, playerY));
+                if (trail.Count > 7) trail.RemoveAt(0); // Uchováme jen posledních 7 duchù
+            }
+
             if (playerY > 1000) Die();
 
-            // 6. Kolize s ostny
+            // Kolize ostny
             RectangleF playerHitbox = new RectangleF(playerX + 5, playerY + 5, playerSize - 10, playerSize - 10);
             foreach (Rectangle s in spikes)
             {
-                // Zmenšený hitbox ostnu (spravedlivìjší trojúhelník)
                 RectangleF spikeHitbox = new RectangleF(s.X + 10, s.Y + 15, s.Width - 20, s.Height - 15);
                 if (playerHitbox.IntersectsWith(spikeHitbox))
                 {
@@ -142,17 +166,11 @@ namespace GeometryDashLevel
                 }
             }
 
-            // 7. Prùchod cílem
-            if (playerHitbox.IntersectsWith(finishLine))
-            {
-                Win();
-                return;
-            }
+            // Výhra
+            if (playerHitbox.IntersectsWith(finishLine)) Win();
 
-            // 8. Posun kamery (Kamera sleduje hráèe, aby byl na levé stranì obrazovky)
             cameraX = playerX - 200;
-
-            this.Invalidate(); // Pøekreslení obrazovky
+            this.Invalidate();
         }
 
         private void KeyIsDown(object sender, KeyEventArgs e)
@@ -162,7 +180,6 @@ namespace GeometryDashLevel
                 velocityY = jumpForce;
                 isGrounded = false;
             }
-            // Klávesa 'R' pro restart v pøípadì, že jsi naboural nebo vyhrál
             if (e.KeyCode == Keys.R && (gameOver || levelComplete))
             {
                 LoadLevel();
@@ -173,6 +190,19 @@ namespace GeometryDashLevel
         private void Die()
         {
             gameOver = true;
+            // Vygenerování 40 èástic pro explozi
+            for (int i = 0; i < 40; i++)
+            {
+                deathParticles.Add(new Particle
+                {
+                    X = playerX + playerSize / 2,
+                    Y = playerY + playerSize / 2,
+                    VX = (float)(rnd.NextDouble() * 16 - 8),
+                    VY = (float)(rnd.NextDouble() * 16 - 10),
+                    Life = 1.0f,
+                    Color = (rnd.Next(2) == 0) ? Color.Yellow : Color.Orange
+                });
+            }
             this.Invalidate();
         }
 
@@ -186,23 +216,30 @@ namespace GeometryDashLevel
         {
             base.OnPaint(e);
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.SmoothingMode = SmoothingMode.HighQuality; // Nejvyšší možná kvalita vyhlazování
 
-            // POSUN KAMERY - Tímhle trikem se celý svìt posouvá doleva, zatímco hráè "bìží" doprava
+            // Kreslení møížky na pozadí (Parallax efekt)
+            Pen gridPen = new Pen(Color.FromArgb(30, 30, 45), 1);
+            float bgOffsetX = -(cameraX * 0.3f) % 100; // Hýbe se pomaleji než popøedí
+            for (float x = bgOffsetX; x < this.Width; x += 100) g.DrawLine(gridPen, x, 0, x, this.Height);
+            for (float y = 0; y < this.Height; y += 100) g.DrawLine(gridPen, 0, y, this.Width, y);
+
+            // Aplikování hlavní kamery pro zbytek svìta
             g.TranslateTransform(-cameraX, 0);
 
-            // 1. Kreslení plošin
-            Brush blockBrush = new SolidBrush(Color.FromArgb(50, 50, 90));
-            Pen blockOutline = new Pen(Color.Cyan, 3);
+            // Kreslení plošin s neonovým pøechodem
             foreach (Rectangle p in platforms)
             {
-                g.FillRectangle(blockBrush, p);
-                g.DrawRectangle(blockOutline, p.X, p.Y, p.Width, p.Height);
-                // Svítící linka na vršku plošiny
-                g.DrawLine(new Pen(Color.White, 2), p.X, p.Y, p.X + p.Width, p.Y);
+                if (p.Width > 0 && p.Height > 0)
+                {
+                    LinearGradientBrush brush = new LinearGradientBrush(p, Color.FromArgb(40, 40, 80), Color.FromArgb(10, 10, 25), LinearGradientMode.Vertical);
+                    g.FillRectangle(brush, p);
+                    g.DrawRectangle(new Pen(Color.DeepSkyBlue, 2), p.X, p.Y, p.Width, p.Height);
+                    g.DrawLine(new Pen(Color.Cyan, 4), p.X, p.Y, p.X + p.Width, p.Y); // Zvýraznìná vrchní hrana
+                }
             }
 
-            // 2. Kreslení ostnù
+            // Kreslení ostnù
             Brush spikeBrush = new SolidBrush(Color.Red);
             foreach (Rectangle s in spikes)
             {
@@ -212,35 +249,56 @@ namespace GeometryDashLevel
                     new Point(s.X + s.Width, s.Y + s.Height)
                 };
                 g.FillPolygon(spikeBrush, triangle);
-                g.DrawPolygon(new Pen(Color.DarkRed, 2), triangle);
+                g.DrawPolygon(new Pen(Color.White, 1), triangle); // Bílá hrana pro lepší viditelnost
             }
 
-            // 3. Kreslení cíle
+            // Kreslení cíle
             g.FillRectangle(new SolidBrush(Color.FromArgb(100, 0, 255, 0)), finishLine);
             g.DrawString("CÍL!", new Font("Arial", 24, FontStyle.Bold), Brushes.White, finishLine.X + 10, 200);
 
-            // 4. Kreslení hráèe (Pokud neumøel)
+            // Kreslení Trail efektu (Stopy)
+            if (!gameOver)
+            {
+                for (int i = 0; i < trail.Count; i++)
+                {
+                    int alpha = (int)(((float)(i + 1) / trail.Count) * 100); // Postupné blednutí
+                    SolidBrush trailBrush = new SolidBrush(Color.FromArgb(alpha, Color.Orange));
+                    g.FillRectangle(trailBrush, trail[i].X, trail[i].Y, playerSize, playerSize);
+                }
+            }
+
+            // Kreslení hráèe
             if (!gameOver)
             {
                 g.TranslateTransform(playerX + playerSize / 2, playerY + playerSize / 2);
                 g.RotateTransform(playerRotation);
 
                 Rectangle playerRect = new Rectangle(-playerSize / 2, -playerSize / 2, playerSize, playerSize);
-                g.FillRectangle(new SolidBrush(Color.Yellow), playerRect);
-                g.DrawRectangle(new Pen(Color.Orange, 3), playerRect);
+                // Pøechod uvnitø kostky
+                LinearGradientBrush playerBrush = new LinearGradientBrush(playerRect, Color.Yellow, Color.DarkOrange, LinearGradientMode.ForwardDiagonal);
+                g.FillRectangle(playerBrush, playerRect);
+                g.DrawRectangle(new Pen(Color.White, 2), playerRect);
 
-                // Oblièej
                 g.FillRectangle(Brushes.Black, -10, -12, 6, 6);
                 g.FillRectangle(Brushes.Black, 4, -12, 6, 6);
 
                 g.ResetTransform();
-                g.TranslateTransform(-cameraX, 0); // Vracíme zpìt transformaci kamery
+                g.TranslateTransform(-cameraX, 0);
             }
 
-            // Zrušení transformace pro kreslení UI prvkù (texty, které stojí na místì na obrazovce)
+            // Kreslení èástic exploze (když hráè umøe)
+            if (gameOver)
+            {
+                foreach (Particle p in deathParticles)
+                {
+                    int alpha = Math.Max(0, Math.Min(255, (int)(p.Life * 255)));
+                    g.FillRectangle(new SolidBrush(Color.FromArgb(alpha, p.Color)), p.X, p.Y, 8, 8);
+                }
+            }
+
+            // UI (Texty)
             g.ResetTransform();
 
-            // 5. Herní texty a UI
             if (gameOver)
             {
                 g.DrawString("ZEMØEL JSI!", new Font("Arial", 36, FontStyle.Bold), Brushes.Red, 250, 150);
@@ -253,7 +311,6 @@ namespace GeometryDashLevel
             }
             else
             {
-                // Ukazatel pokroku v procentech
                 int progress = (int)((playerX / finishLine.X) * 100);
                 if (progress > 100) progress = 100;
                 if (progress < 0) progress = 0;
