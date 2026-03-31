@@ -69,21 +69,31 @@ namespace GeometryDashPolished
             trail.Clear();
             deathParticles.Clear();
 
-            // Mapa
-            platforms.Add(new Rectangle(0, 350, 800, 500));
-            platforms.Add(new Rectangle(950, 280, 300, 500));
-            platforms.Add(new Rectangle(1400, 350, 400, 500));
-            platforms.Add(new Rectangle(1800, 250, 300, 500));
-            platforms.Add(new Rectangle(2100, 150, 400, 500));
+            // --- MAPA (Plošiny) ---
+            // Kostka vyskoèí max cca 90 pixelù vysoko a 200 pixelù do dálky.
+            platforms.Add(new Rectangle(0, 350, 800, 500));         // Startovní rovinka
+            platforms.Add(new Rectangle(920, 350, 400, 500));       // Propast (120px široká, v pohodì doskoèíš)
+            platforms.Add(new Rectangle(1320, 290, 300, 500));      // První schod nahoru (+60px výška, akorát na skok)
+            platforms.Add(new Rectangle(1620, 350, 600, 500));      // Seskok zpátky dolù 
+            platforms.Add(new Rectangle(2220, 290, 300, 500));      // Druhý schod nahoru (+60px)
+            platforms.Add(new Rectangle(2520, 230, 400, 500));      // Tøetí schod nahoru ke konci (+60px)
 
-            // Ostny
-            spikes.Add(new Rectangle(500, 310, 40, 40));
-            spikes.Add(new Rectangle(1550, 310, 40, 40));
-            spikes.Add(new Rectangle(1650, 310, 40, 40));
+            // --- OSTNY ---
+            // (X pozice, Y pozice = o 40 ménì než má plošina, pod kterou leží)
+            spikes.Add(new Rectangle(400, 310, 40, 40));            // Osten na startu
+            spikes.Add(new Rectangle(650, 310, 40, 40));            // Osten pøed propastí
+            spikes.Add(new Rectangle(1100, 310, 40, 40));           // Osten hned za propastí
 
-            finishLine = new Rectangle(2400, -100, 100, 800);
+            // Dvojitý osten po seskoku dolù (dá se v pohodì pøeskoèit)
+            spikes.Add(new Rectangle(1800, 310, 40, 40));
+            spikes.Add(new Rectangle(1840, 310, 40, 40));
 
-            // Reset 
+            spikes.Add(new Rectangle(2050, 310, 40, 40));           // Osten pøed schodem
+
+            // --- CÍL ---
+            finishLine = new Rectangle(2800, -100, 100, 800);       // Cíl pøesunutý až na konec opravené mapy
+
+            // Resetování promìnných na zaèátek
             playerX = 100;
             playerY = 250;
             velocityY = 0;
