@@ -1,14 +1,21 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics; // Z·sadnÌ pro p¯esnÈ mÏ¯enÌ Ëasu
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace GeometryDashPolished
+namespace GeometryDashUltraSmooth
 {
     public class GameForm : Form
     {
         private System.Windows.Forms.Timer gameTimer;
+
+        // NOVINKA: Stopky a akumul·tor Ëasu pro profi plynulost
+        private Stopwatch stopwatch = new Stopwatch();
+        private double timeAccumulator = 0;
+        private const double FixedTimeStep = 16.6666; // P¯esnÏ 60 krok˘ za vte¯inu (1000ms / 60)
+
         private Random rnd = new Random();
 
         // Fyzika a pozice hr·Ëe
@@ -29,15 +36,14 @@ namespace GeometryDashPolished
         private float cameraX = 0;
 
         // Vizu·lnÌ efekty
-        private List<PointF> trail = new List<PointF>(); // Stopa za hr·Ëem
-        private List<Particle> deathParticles = new List<Particle>(); // Exploze
+        private List<PointF> trail = new List<PointF>();
+        private List<Particle> deathParticles = new List<Particle>();
         private int tickCounter = 0;
 
         // Stavy hry
         private bool gameOver = false;
         private bool levelComplete = false;
 
-        // Pomocn· t¯Ìda pro Ë·stice exploze
         private class Particle
         {
             public float X, Y, VX, VY, Life;
@@ -46,10 +52,10 @@ namespace GeometryDashPolished
 
         public GameForm()
         {
-            this.Text = "Geometry Dash - Grafick˝ Upgrade";
+            this.Text = "Geometry Dash - 60 FPS Plynul· verze";
             this.Size = new Size(900, 500);
             this.DoubleBuffered = true;
-            this.BackColor = Color.FromArgb(15, 15, 25); // JeötÏ tmavöÌ pozadÌ pro vyniknutÌ neon˘
+            this.BackColor = Color.FromArgb(15, 15, 25);
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.KeyDown += KeyIsDown;
@@ -57,8 +63,10 @@ namespace GeometryDashPolished
             LoadLevel();
 
             gameTimer = new System.Windows.Forms.Timer();
-            gameTimer.Interval = 16;
+            gameTimer.Interval = 1; // ÿekneme Timeru, aù bÏûÌ co nejrychleji to jde
             gameTimer.Tick += GameTick;
+
+            stopwatch.Start(); // SpustÌme profi stopky
             gameTimer.Start();
         }
 
@@ -69,29 +77,49 @@ namespace GeometryDashPolished
             trail.Clear();
             deathParticles.Clear();
 
-            // --- MAPA (Ploöiny) ---
-            // Kostka vyskoËÌ max cca 90 pixel˘ vysoko a 200 pixel˘ do d·lky.
-            platforms.Add(new Rectangle(0, 350, 800, 500));         // StartovnÌ rovinka
-            platforms.Add(new Rectangle(920, 350, 400, 500));       // Propast (120px öirok·, v pohodÏ doskoËÌö)
-            platforms.Add(new Rectangle(1320, 290, 300, 500));      // PrvnÌ schod nahoru (+60px v˝öka, akor·t na skok)
-            platforms.Add(new Rectangle(1620, 350, 600, 500));      // Seskok zp·tky dol˘ 
-            platforms.Add(new Rectangle(2220, 290, 300, 500));      // Druh˝ schod nahoru (+60px)
-            platforms.Add(new Rectangle(2520, 230, 400, 500));      // T¯etÌ schod nahoru ke konci (+60px)
+            // --- 1. »¡ST: Zn·m˝ zaË·tek ---
+            platforms.Add(new Rectangle(0, 350, 800, 500));
+            platforms.Add(new Rectangle(920, 350, 400, 500));
+            platforms.Add(new Rectangle(1320, 290, 300, 500));
+            platforms.Add(new Rectangle(1620, 350, 600, 500));
+            platforms.Add(new Rectangle(2220, 290, 300, 500));
+            platforms.Add(new Rectangle(2520, 230, 400, 500));
 
-            // --- OSTNY ---
-            // (X pozice, Y pozice = o 40 mÈnÏ neû m· ploöina, pod kterou leûÌ)
-            spikes.Add(new Rectangle(400, 310, 40, 40));            // Osten na startu
-            spikes.Add(new Rectangle(650, 310, 40, 40));            // Osten p¯ed propastÌ
-            spikes.Add(new Rectangle(1100, 310, 40, 40));           // Osten hned za propastÌ
-
-            // Dvojit˝ osten po seskoku dol˘ (d· se v pohodÏ p¯eskoËit)
+            spikes.Add(new Rectangle(400, 310, 40, 40));
+            spikes.Add(new Rectangle(650, 310, 40, 40));
+            spikes.Add(new Rectangle(1100, 310, 40, 40));
             spikes.Add(new Rectangle(1800, 310, 40, 40));
             spikes.Add(new Rectangle(1840, 310, 40, 40));
+            spikes.Add(new Rectangle(2050, 310, 40, 40));
 
-            spikes.Add(new Rectangle(2050, 310, 40, 40));           // Osten p¯ed schodem
+            // --- 2. »¡ST: Nov· sekce (LevitujÌcÌ ostr˘vky a propasti) ---
+            // Velk˝ seskok dol˘ po prvnÌch schodech
+            platforms.Add(new Rectangle(3000, 350, 600, 500));
+            spikes.Add(new Rectangle(3200, 310, 40, 40));
+            spikes.Add(new Rectangle(3400, 310, 40, 40));
 
-            // --- CÕL ---
-            finishLine = new Rectangle(2800, -100, 100, 800);       // CÌl p¯esunut˝ aû na konec opravenÈ mapy
+            // Sk·k·nÌ po plovoucÌch ploöin·ch (Pozor, pod nimi je propast!)
+            platforms.Add(new Rectangle(3750, 290, 150, 30)); // PrvnÌ ostr˘vek
+            platforms.Add(new Rectangle(4050, 230, 150, 30)); // Druh˝ ostr˘vek (v˝ö)
+            platforms.Add(new Rectangle(4350, 290, 150, 30)); // T¯etÌ ostr˘vek (nÌû)
+
+            // --- 3. »¡ST: Dlouh· rovinka s pastmi ---
+            platforms.Add(new Rectangle(4650, 350, 1000, 500));
+            spikes.Add(new Rectangle(4800, 310, 40, 40));
+            spikes.Add(new Rectangle(5000, 310, 40, 40));
+            spikes.Add(new Rectangle(5040, 310, 40, 40)); // Dvojit˝ osten
+            spikes.Add(new Rectangle(5300, 310, 40, 40));
+
+            // --- 4. »¡ST: Fin·lnÌ "Schody smrti" ---
+            platforms.Add(new Rectangle(5800, 290, 150, 500));
+            platforms.Add(new Rectangle(6100, 230, 150, 500));
+            platforms.Add(new Rectangle(6400, 170, 800, 500)); // PoslednÌ dlouh· ploöina
+
+            // PoslednÌ osten tÏsnÏ p¯ed cÌlem pro zkouöku nerv˘
+            spikes.Add(new Rectangle(6800, 130, 40, 40));
+
+            // --- CÕL --- (Posunut˝ z 2800 na 7000!)
+            finishLine = new Rectangle(7000, -200, 100, 1000);
 
             // Resetov·nÌ promÏnn˝ch na zaË·tek
             playerX = 100;
@@ -103,22 +131,49 @@ namespace GeometryDashPolished
             tickCounter = 0;
         }
 
-        private void GameTick(object sender, EventArgs e)
+        // --- NOV› PLYNUL› GAME TICK ---
+        private void GameTick(object? sender, EventArgs e)
+        {
+            // P¯iËteme re·ln˝ Ëas, kter˝ ubÏhl od poslednÌho tiknutÌ
+            timeAccumulator += stopwatch.Elapsed.TotalMilliseconds;
+            stopwatch.Restart();
+
+            // Ochrana: Pokud chytneö okno myöÌ a hra se na chvÌli zasekne,
+            // nechceme, aby pak probÏhlo 1000 updat˘ nar·z.
+            if (timeAccumulator > 100) timeAccumulator = 100;
+
+            bool physicsUpdated = false;
+
+            // Logika se updatuje v PÿESN›CH krocÌch (naprosto stabilnÌ skoky)
+            while (timeAccumulator >= FixedTimeStep)
+            {
+                UpdatePhysics();
+                timeAccumulator -= FixedTimeStep;
+                physicsUpdated = true;
+            }
+
+            // P¯ekreslÌme grafiku, jen kdyû se fyzika re·lnÏ pohnula
+            if (physicsUpdated)
+            {
+                this.Invalidate();
+            }
+        }
+
+        // Veöker· logika p¯esunuta sem z p˘vodnÌho GameTicku
+        private void UpdatePhysics()
         {
             tickCounter++;
 
-            // Pokud jsme mrtvÌ, aktualizujeme jen Ë·stice a nepokraËujeme d·l
             if (gameOver)
             {
                 for (int i = deathParticles.Count - 1; i >= 0; i--)
                 {
                     deathParticles[i].X += deathParticles[i].VX;
                     deathParticles[i].Y += deathParticles[i].VY;
-                    deathParticles[i].VY += 0.5f; // Gravitace Ë·stic
-                    deathParticles[i].Life -= 0.03f; // UmÌr·nÌ Ë·stic
+                    deathParticles[i].VY += 0.5f;
+                    deathParticles[i].Life -= 0.03f;
                     if (deathParticles[i].Life <= 0) deathParticles.RemoveAt(i);
                 }
-                this.Invalidate();
                 return;
             }
 
@@ -132,7 +187,6 @@ namespace GeometryDashPolished
 
             RectangleF playerRect = new RectangleF(playerX, playerY, playerSize, playerSize);
 
-            // Kolize s ploöinami
             foreach (Rectangle p in platforms)
             {
                 if (playerRect.IntersectsWith(p))
@@ -152,19 +206,16 @@ namespace GeometryDashPolished
                 }
             }
 
-            // Rotace
             if (!isGrounded) playerRotation += 7f;
 
-            // Ukl·d·nÌ stopy pro Trail efekt (kaûd˝ druh˝ snÌmek uloûÌme pozici)
             if (tickCounter % 2 == 0)
             {
                 trail.Add(new PointF(playerX, playerY));
-                if (trail.Count > 7) trail.RemoveAt(0); // Uchov·me jen poslednÌch 7 duch˘
+                if (trail.Count > 7) trail.RemoveAt(0);
             }
 
             if (playerY > 1000) Die();
 
-            // Kolize ostny
             RectangleF playerHitbox = new RectangleF(playerX + 5, playerY + 5, playerSize - 10, playerSize - 10);
             foreach (Rectangle s in spikes)
             {
@@ -176,14 +227,12 @@ namespace GeometryDashPolished
                 }
             }
 
-            // V˝hra
             if (playerHitbox.IntersectsWith(finishLine)) Win();
 
             cameraX = playerX - 200;
-            this.Invalidate();
         }
 
-        private void KeyIsDown(object sender, KeyEventArgs e)
+        private void KeyIsDown(object? sender, KeyEventArgs e)
         {
             if ((e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) && isGrounded && !gameOver && !levelComplete)
             {
@@ -193,6 +242,9 @@ namespace GeometryDashPolished
             if (e.KeyCode == Keys.R && (gameOver || levelComplete))
             {
                 LoadLevel();
+                // Resetov·nÌ akumul·toru p¯i startu novÈ hry, aù n·m to na zaË·tku "neust¯elÌ"
+                timeAccumulator = 0;
+                stopwatch.Restart();
                 gameTimer.Start();
             }
         }
@@ -200,7 +252,6 @@ namespace GeometryDashPolished
         private void Die()
         {
             gameOver = true;
-            // Vygenerov·nÌ 40 Ë·stic pro explozi
             for (int i = 0; i < 40; i++)
             {
                 deathParticles.Add(new Particle
@@ -213,31 +264,27 @@ namespace GeometryDashPolished
                     Color = (rnd.Next(2) == 0) ? Color.Yellow : Color.Orange
                 });
             }
-            this.Invalidate();
         }
 
         private void Win()
         {
             levelComplete = true;
-            this.Invalidate();
         }
 
+        // TATO »¡ST (KreslenÌ) ZŸST¡V¡ ZCELA STEJN¡
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.HighQuality; // NejvyööÌ moûn· kvalita vyhlazov·nÌ
+            g.SmoothingMode = SmoothingMode.HighQuality;
 
-            // KreslenÌ m¯Ìûky na pozadÌ (Parallax efekt)
             Pen gridPen = new Pen(Color.FromArgb(30, 30, 45), 1);
-            float bgOffsetX = -(cameraX * 0.3f) % 100; // H˝be se pomaleji neû pop¯edÌ
+            float bgOffsetX = -(cameraX * 0.3f) % 100;
             for (float x = bgOffsetX; x < this.Width; x += 100) g.DrawLine(gridPen, x, 0, x, this.Height);
             for (float y = 0; y < this.Height; y += 100) g.DrawLine(gridPen, 0, y, this.Width, y);
 
-            // Aplikov·nÌ hlavnÌ kamery pro zbytek svÏta
             g.TranslateTransform(-cameraX, 0);
 
-            // KreslenÌ ploöin s neonov˝m p¯echodem
             foreach (Rectangle p in platforms)
             {
                 if (p.Width > 0 && p.Height > 0)
@@ -245,11 +292,10 @@ namespace GeometryDashPolished
                     LinearGradientBrush brush = new LinearGradientBrush(p, Color.FromArgb(40, 40, 80), Color.FromArgb(10, 10, 25), LinearGradientMode.Vertical);
                     g.FillRectangle(brush, p);
                     g.DrawRectangle(new Pen(Color.DeepSkyBlue, 2), p.X, p.Y, p.Width, p.Height);
-                    g.DrawLine(new Pen(Color.Cyan, 4), p.X, p.Y, p.X + p.Width, p.Y); // Zv˝raznÏn· vrchnÌ hrana
+                    g.DrawLine(new Pen(Color.Cyan, 4), p.X, p.Y, p.X + p.Width, p.Y);
                 }
             }
 
-            // KreslenÌ ostn˘
             Brush spikeBrush = new SolidBrush(Color.Red);
             foreach (Rectangle s in spikes)
             {
@@ -259,32 +305,28 @@ namespace GeometryDashPolished
                     new Point(s.X + s.Width, s.Y + s.Height)
                 };
                 g.FillPolygon(spikeBrush, triangle);
-                g.DrawPolygon(new Pen(Color.White, 1), triangle); // BÌl· hrana pro lepöÌ viditelnost
+                g.DrawPolygon(new Pen(Color.White, 1), triangle);
             }
 
-            // KreslenÌ cÌle
             g.FillRectangle(new SolidBrush(Color.FromArgb(100, 0, 255, 0)), finishLine);
             g.DrawString("CÕL!", new Font("Arial", 24, FontStyle.Bold), Brushes.White, finishLine.X + 10, 200);
 
-            // KreslenÌ Trail efektu (Stopy)
             if (!gameOver)
             {
                 for (int i = 0; i < trail.Count; i++)
                 {
-                    int alpha = (int)(((float)(i + 1) / trail.Count) * 100); // PostupnÈ blednutÌ
+                    int alpha = (int)(((float)(i + 1) / trail.Count) * 100);
                     SolidBrush trailBrush = new SolidBrush(Color.FromArgb(alpha, Color.Orange));
                     g.FillRectangle(trailBrush, trail[i].X, trail[i].Y, playerSize, playerSize);
                 }
             }
 
-            // KreslenÌ hr·Ëe
             if (!gameOver)
             {
                 g.TranslateTransform(playerX + playerSize / 2, playerY + playerSize / 2);
                 g.RotateTransform(playerRotation);
 
                 Rectangle playerRect = new Rectangle(-playerSize / 2, -playerSize / 2, playerSize, playerSize);
-                // P¯echod uvnit¯ kostky
                 LinearGradientBrush playerBrush = new LinearGradientBrush(playerRect, Color.Yellow, Color.DarkOrange, LinearGradientMode.ForwardDiagonal);
                 g.FillRectangle(playerBrush, playerRect);
                 g.DrawRectangle(new Pen(Color.White, 2), playerRect);
@@ -296,7 +338,6 @@ namespace GeometryDashPolished
                 g.TranslateTransform(-cameraX, 0);
             }
 
-            // KreslenÌ Ë·stic exploze (kdyû hr·Ë um¯e)
             if (gameOver)
             {
                 foreach (Particle p in deathParticles)
@@ -306,7 +347,6 @@ namespace GeometryDashPolished
                 }
             }
 
-            // UI (Texty)
             g.ResetTransform();
 
             if (gameOver)
