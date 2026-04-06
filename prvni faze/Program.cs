@@ -4,9 +4,9 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
-using System.Media; // TADY JE KNIHOVNA PRO HUDBU!
+using System.Media;
 
-namespace GeometryDashWithMusic
+namespace GeometryDashFullScreen
 {
     public class GameForm : Form
     {
@@ -16,8 +16,6 @@ namespace GeometryDashWithMusic
         private const double FixedTimeStep = 16.6666;
 
         private Random rnd = new Random();
-
-        // PØEHRÁVAÈ HUDBY
         private SoundPlayer bgMusic;
 
         // Fyzika a pozice
@@ -54,12 +52,13 @@ namespace GeometryDashWithMusic
 
         public GameForm()
         {
-            this.Text = "Geometry Dash - Hra s Hudbou!";
-            this.Size = new Size(900, 500);
+            // --- NASTAVENÍ FULL SCREENU ---
+            this.Text = "Geometry Dash - Full Screen";
             this.DoubleBuffered = true;
             this.BackColor = Color.FromArgb(15, 15, 25);
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;
-            this.MaximizeBox = false;
+            this.FormBorderStyle = FormBorderStyle.None; // Skryje okraje okna
+            this.WindowState = FormWindowState.Maximized; // Maximalizuje pøes celou obrazovku
+            this.KeyPreview = true; // Zaruèí, že okno vždy zachytí klávesnici
             this.KeyDown += KeyIsDown;
 
             // Naètení hudby
@@ -69,7 +68,7 @@ namespace GeometryDashWithMusic
             }
             catch (Exception)
             {
-                MessageBox.Show("Pozor: Soubor 'hudba.wav' nebyl nalezen. Hra pobìží bez hudby.", "Chybí hudba");
+                // Hudba nenalezena, nic se nedìje
             }
 
             LoadLevel();
@@ -89,7 +88,7 @@ namespace GeometryDashWithMusic
             trail.Clear();
             deathParticles.Clear();
 
-            // Dlouhá mapa z pøedchozí verze
+            // Mapa
             platforms.Add(new Rectangle(0, 350, 800, 500));
             platforms.Add(new Rectangle(920, 350, 400, 500));
             platforms.Add(new Rectangle(1320, 290, 300, 500));
@@ -133,11 +132,7 @@ namespace GeometryDashWithMusic
             levelComplete = false;
             tickCounter = 0;
 
-            // Pøehrání hudby ve smyèce, jakmile naèteme level
-            if (bgMusic != null)
-            {
-                try { bgMusic.PlayLooping(); } catch { }
-            }
+            if (bgMusic != null) { try { bgMusic.PlayLooping(); } catch { } }
         }
 
         private void GameTick(object? sender, EventArgs e)
@@ -156,10 +151,7 @@ namespace GeometryDashWithMusic
                 physicsUpdated = true;
             }
 
-            if (physicsUpdated)
-            {
-                this.Invalidate();
-            }
+            if (physicsUpdated) this.Invalidate();
         }
 
         private void UpdatePhysics()
@@ -234,13 +226,23 @@ namespace GeometryDashWithMusic
             cameraX = playerX - 200;
         }
 
+        // --- TADY JSOU OPRAVENÉ KLÁVESY ---
         private void KeyIsDown(object? sender, KeyEventArgs e)
         {
+            // Vypnutí hry pomocí ESC
+            if (e.KeyCode == Keys.Escape)
+            {
+                Application.Exit();
+            }
+
+            // Skok
             if ((e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) && isGrounded && !gameOver && !levelComplete)
             {
                 velocityY = jumpForce;
                 isGrounded = false;
             }
+
+            // Restart po smrti nebo výhøe
             if (e.KeyCode == Keys.R && (gameOver || levelComplete))
             {
                 LoadLevel();
@@ -253,7 +255,6 @@ namespace GeometryDashWithMusic
         private void Die()
         {
             gameOver = true;
-            // Když umøeš, hudba se zastaví
             if (bgMusic != null) { try { bgMusic.Stop(); } catch { } }
 
             for (int i = 0; i < 40; i++)
@@ -273,7 +274,6 @@ namespace GeometryDashWithMusic
         private void Win()
         {
             levelComplete = true;
-            // Když vyhraješ, hudba se zastaví
             if (bgMusic != null) { try { bgMusic.Stop(); } catch { } }
         }
 
@@ -283,10 +283,16 @@ namespace GeometryDashWithMusic
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.HighQuality;
 
+            // --- ZVÌTŠENÍ GRAFIKY NA FULL SCREEN ---
+            float scaleX = (float)this.Width / 900f;
+            float scaleY = (float)this.Height / 500f;
+            g.ScaleTransform(scaleX, scaleY);
+
+            // Møížka na pozadí (fixovaná na pùvodní rozlišení)
             Pen gridPen = new Pen(Color.FromArgb(30, 30, 45), 1);
             float bgOffsetX = -(cameraX * 0.3f) % 100;
-            for (float x = bgOffsetX; x < this.Width; x += 100) g.DrawLine(gridPen, x, 0, x, this.Height);
-            for (float y = 0; y < this.Height; y += 100) g.DrawLine(gridPen, 0, y, this.Width, y);
+            for (float x = bgOffsetX; x < 900; x += 100) g.DrawLine(gridPen, x, 0, x, 500);
+            for (float y = 0; y < 500; y += 100) g.DrawLine(gridPen, 0, y, 900, y);
 
             g.TranslateTransform(-cameraX, 0);
 
@@ -354,15 +360,20 @@ namespace GeometryDashWithMusic
 
             g.ResetTransform();
 
+            // Kreslení textù - UI musí být opìt zmenšeno mìøítkem kvùli ScaleTransform
+            g.ScaleTransform(scaleX, scaleY);
+
             if (gameOver)
             {
                 g.DrawString("ZEMØEL JSI!", new Font("Arial", 36, FontStyle.Bold), Brushes.Red, 250, 150);
                 g.DrawString("Stiskni 'R' pro restart", new Font("Arial", 16), Brushes.White, 320, 210);
+                g.DrawString("ESC pro konec", new Font("Arial", 12), Brushes.Gray, 360, 240);
             }
             else if (levelComplete)
             {
                 g.DrawString("LEVEL DOKONÈEN!", new Font("Arial", 36, FontStyle.Bold), Brushes.Lime, 200, 150);
                 g.DrawString("Stiskni 'R' pro hrání znovu", new Font("Arial", 16), Brushes.White, 300, 210);
+                g.DrawString("ESC pro konec", new Font("Arial", 12), Brushes.Gray, 360, 240);
             }
             else
             {
