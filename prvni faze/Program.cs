@@ -1,24 +1,26 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics; // Zásadní pro pøesné mìøení èasu
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using System.Media; // TADY JE KNIHOVNA PRO HUDBU!
 
-namespace GeometryDashUltraSmooth
+namespace GeometryDashWithMusic
 {
     public class GameForm : Form
     {
         private System.Windows.Forms.Timer gameTimer;
-
-        // NOVINKA: Stopky a akumulátor èasu pro profi plynulost
         private Stopwatch stopwatch = new Stopwatch();
         private double timeAccumulator = 0;
-        private const double FixedTimeStep = 16.6666; // Pøesnì 60 krokù za vteøinu (1000ms / 60)
+        private const double FixedTimeStep = 16.6666;
 
         private Random rnd = new Random();
 
-        // Fyzika a pozice hráèe
+        // PØEHRÁVAÈ HUDBY
+        private SoundPlayer bgMusic;
+
+        // Fyzika a pozice
         private float playerX = 100;
         private float playerY = 0;
         private float velocityY = 0;
@@ -35,12 +37,12 @@ namespace GeometryDashUltraSmooth
         private Rectangle finishLine;
         private float cameraX = 0;
 
-        // Vizuální efekty
+        // Efekty
         private List<PointF> trail = new List<PointF>();
         private List<Particle> deathParticles = new List<Particle>();
         private int tickCounter = 0;
 
-        // Stavy hry
+        // Stavy
         private bool gameOver = false;
         private bool levelComplete = false;
 
@@ -52,7 +54,7 @@ namespace GeometryDashUltraSmooth
 
         public GameForm()
         {
-            this.Text = "Geometry Dash - 60 FPS Plynulá verze";
+            this.Text = "Geometry Dash - Hra s Hudbou!";
             this.Size = new Size(900, 500);
             this.DoubleBuffered = true;
             this.BackColor = Color.FromArgb(15, 15, 25);
@@ -60,13 +62,23 @@ namespace GeometryDashUltraSmooth
             this.MaximizeBox = false;
             this.KeyDown += KeyIsDown;
 
+            // Naètení hudby
+            try
+            {
+                bgMusic = new SoundPlayer("hudba.wav");
+            }
+            catch (Exception)
+            {
+                MessageBox.Show("Pozor: Soubor 'hudba.wav' nebyl nalezen. Hra pobìí bez hudby.", "Chybí hudba");
+            }
+
             LoadLevel();
 
             gameTimer = new System.Windows.Forms.Timer();
-            gameTimer.Interval = 1; // Øekneme Timeru, a bìí co nejrychleji to jde
+            gameTimer.Interval = 1;
             gameTimer.Tick += GameTick;
 
-            stopwatch.Start(); // Spustíme profi stopky
+            stopwatch.Start();
             gameTimer.Start();
         }
 
@@ -77,7 +89,7 @@ namespace GeometryDashUltraSmooth
             trail.Clear();
             deathParticles.Clear();
 
-            // --- 1. ÈÁST: Známı zaèátek ---
+            // Dlouhá mapa z pøedchozí verze
             platforms.Add(new Rectangle(0, 350, 800, 500));
             platforms.Add(new Rectangle(920, 350, 400, 500));
             platforms.Add(new Rectangle(1320, 290, 300, 500));
@@ -92,36 +104,27 @@ namespace GeometryDashUltraSmooth
             spikes.Add(new Rectangle(1840, 310, 40, 40));
             spikes.Add(new Rectangle(2050, 310, 40, 40));
 
-            // --- 2. ÈÁST: Nová sekce (Levitující ostrùvky a propasti) ---
-            // Velkı seskok dolù po prvních schodech
             platforms.Add(new Rectangle(3000, 350, 600, 500));
             spikes.Add(new Rectangle(3200, 310, 40, 40));
             spikes.Add(new Rectangle(3400, 310, 40, 40));
 
-            // Skákání po plovoucích plošinách (Pozor, pod nimi je propast!)
-            platforms.Add(new Rectangle(3750, 290, 150, 30)); // První ostrùvek
-            platforms.Add(new Rectangle(4050, 230, 150, 30)); // Druhı ostrùvek (vıš)
-            platforms.Add(new Rectangle(4350, 290, 150, 30)); // Tøetí ostrùvek (ní)
+            platforms.Add(new Rectangle(3750, 290, 150, 30));
+            platforms.Add(new Rectangle(4050, 230, 150, 30));
+            platforms.Add(new Rectangle(4350, 290, 150, 30));
 
-            // --- 3. ÈÁST: Dlouhá rovinka s pastmi ---
             platforms.Add(new Rectangle(4650, 350, 1000, 500));
             spikes.Add(new Rectangle(4800, 310, 40, 40));
             spikes.Add(new Rectangle(5000, 310, 40, 40));
-            spikes.Add(new Rectangle(5040, 310, 40, 40)); // Dvojitı osten
+            spikes.Add(new Rectangle(5040, 310, 40, 40));
             spikes.Add(new Rectangle(5300, 310, 40, 40));
 
-            // --- 4. ÈÁST: Finální "Schody smrti" ---
             platforms.Add(new Rectangle(5800, 290, 150, 500));
             platforms.Add(new Rectangle(6100, 230, 150, 500));
-            platforms.Add(new Rectangle(6400, 170, 800, 500)); // Poslední dlouhá plošina
-
-            // Poslední osten tìsnì pøed cílem pro zkoušku nervù
+            platforms.Add(new Rectangle(6400, 170, 800, 500));
             spikes.Add(new Rectangle(6800, 130, 40, 40));
 
-            // --- CÍL --- (Posunutı z 2800 na 7000!)
             finishLine = new Rectangle(7000, -200, 100, 1000);
 
-            // Resetování promìnnıch na zaèátek
             playerX = 100;
             playerY = 250;
             velocityY = 0;
@@ -129,22 +132,23 @@ namespace GeometryDashUltraSmooth
             gameOver = false;
             levelComplete = false;
             tickCounter = 0;
+
+            // Pøehrání hudby ve smyèce, jakmile naèteme level
+            if (bgMusic != null)
+            {
+                try { bgMusic.PlayLooping(); } catch { }
+            }
         }
 
-        // --- NOVİ PLYNULİ GAME TICK ---
         private void GameTick(object? sender, EventArgs e)
         {
-            // Pøièteme reálnı èas, kterı ubìhl od posledního tiknutí
             timeAccumulator += stopwatch.Elapsed.TotalMilliseconds;
             stopwatch.Restart();
 
-            // Ochrana: Pokud chytneš okno myší a hra se na chvíli zasekne,
-            // nechceme, aby pak probìhlo 1000 updatù naráz.
             if (timeAccumulator > 100) timeAccumulator = 100;
 
             bool physicsUpdated = false;
 
-            // Logika se updatuje v PØESNİCH krocích (naprosto stabilní skoky)
             while (timeAccumulator >= FixedTimeStep)
             {
                 UpdatePhysics();
@@ -152,14 +156,12 @@ namespace GeometryDashUltraSmooth
                 physicsUpdated = true;
             }
 
-            // Pøekreslíme grafiku, jen kdy se fyzika reálnì pohnula
             if (physicsUpdated)
             {
                 this.Invalidate();
             }
         }
 
-        // Veškerá logika pøesunuta sem z pùvodního GameTicku
         private void UpdatePhysics()
         {
             tickCounter++;
@@ -242,7 +244,6 @@ namespace GeometryDashUltraSmooth
             if (e.KeyCode == Keys.R && (gameOver || levelComplete))
             {
                 LoadLevel();
-                // Resetování akumulátoru pøi startu nové hry, a nám to na zaèátku "neustøelí"
                 timeAccumulator = 0;
                 stopwatch.Restart();
                 gameTimer.Start();
@@ -252,6 +253,9 @@ namespace GeometryDashUltraSmooth
         private void Die()
         {
             gameOver = true;
+            // Kdy umøeš, hudba se zastaví
+            if (bgMusic != null) { try { bgMusic.Stop(); } catch { } }
+
             for (int i = 0; i < 40; i++)
             {
                 deathParticles.Add(new Particle
@@ -269,9 +273,10 @@ namespace GeometryDashUltraSmooth
         private void Win()
         {
             levelComplete = true;
+            // Kdy vyhraješ, hudba se zastaví
+            if (bgMusic != null) { try { bgMusic.Stop(); } catch { } }
         }
 
-        // TATO ÈÁST (Kreslení) ZÙSTÁVÁ ZCELA STEJNÁ
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
